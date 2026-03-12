@@ -209,6 +209,7 @@ pub struct CognitiveGuardian {
     /// Recent tool names (ring buffer for breadcrumbs).
     recent_tools: Vec<String>,
     /// When the guardian was created (for breadcrumb timestamps).
+    #[allow(dead_code)]
     created_at: DateTime<Utc>,
 }
 
@@ -607,9 +608,9 @@ mod tests {
             guardian.on_tool_call(name);
         }
 
-        // Should keep last 5
+        // Should keep last 5: write, search, edit, deploy, test
         assert_eq!(guardian.recent_tools.len(), 5);
-        assert_eq!(guardian.recent_tools[0], "search");
+        assert_eq!(guardian.recent_tools[0], "write");
         assert_eq!(guardian.recent_tools[4], "test");
     }
 

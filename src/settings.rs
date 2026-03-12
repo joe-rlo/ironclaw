@@ -452,6 +452,7 @@ impl Default for AgentSettings {
             auto_approve_tools: false,
             default_timezone: default_timezone(),
             max_tokens_per_job: 0,
+            cognitive: crate::agent::cognitive::CognitiveConfig::default(),
         }
     }
 }
