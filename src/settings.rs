@@ -390,6 +390,11 @@ pub struct AgentSettings {
     /// Maximum tokens per job (0 = unlimited).
     #[serde(default)]
     pub max_tokens_per_job: u64,
+
+    /// Cognitive Guardian: proactive memory discipline (checkpoint nudges,
+    /// memory search reminders, auto-breadcrumbs). Off by default.
+    #[serde(default)]
+    pub cognitive: crate::agent::cognitive::CognitiveConfig,
 }
 
 fn default_agent_name() -> String {

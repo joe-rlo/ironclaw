@@ -159,6 +159,11 @@ impl Agent {
         let force_text_at = max_tool_iterations;
         let nudge_at = max_tool_iterations.saturating_sub(1);
 
+        let mut cognitive = crate::agent::cognitive::CognitiveGuardian::new(
+            self.config.cognitive.clone(),
+        );
+        cognitive.on_new_turn();
+
         let delegate = ChatDelegate {
             agent: self,
             session: session.clone(),
@@ -171,6 +176,7 @@ impl Agent {
             nudge_at,
             force_text_at,
             user_tz,
+            cognitive: std::sync::Mutex::new(cognitive),
         };
 
         let mut reason_ctx = ReasoningContext::new()
@@ -245,6 +251,8 @@ struct ChatDelegate<'a> {
     nudge_at: usize,
     force_text_at: usize,
     user_tz: chrono_tz::Tz,
+    /// Cognitive Guardian for proactive memory discipline.
+    cognitive: std::sync::Mutex<crate::agent::cognitive::CognitiveGuardian>,
 }
 
 #[async_trait]
@@ -273,6 +281,16 @@ impl<'a> LoopDelegate for ChatDelegate<'a> {
                  using the information you have gathered so far. \
                  Do not call any more tools.",
             ));
+        }
+
+        // Cognitive Guardian: inject memory discipline nudges.
+        if let Ok(mut guardian) = self.cognitive.lock() {
+            if let Some(nudge) = guardian.get_nudge() {
+                tracing::debug!("Cognitive Guardian nudge: {}", nudge);
+                reason_ctx
+                    .messages
+                    .push(ChatMessage::system(&nudge.to_string()));
+            }
         }
 
         let force_text = iteration >= self.force_text_at;
@@ -457,6 +475,42 @@ impl<'a> LoopDelegate for ChatDelegate<'a> {
             {
                 for (tc, safe_args) in tool_calls.iter().zip(redacted_args) {
                     turn.record_tool_call(&tc.name, safe_args);
+                }
+            }
+        }
+
+        // Cognitive Guardian: track tool calls and write auto-breadcrumbs.
+        //
+        // We split this into two phases to avoid holding the std::sync::Mutex
+        // across an .await point:
+        // 1. Lock, update counters, snapshot state if breadcrumb needed
+        // 2. Unlock, then write breadcrumb asynchronously if flagged
+        let breadcrumb_data: Option<(usize, Vec<String>)> = {
+            let mut guardian = self.cognitive.lock().unwrap_or_else(|e| e.into_inner());
+            for tc in &tool_calls {
+                guardian.on_tool_call(&tc.name);
+            }
+            if guardian.should_auto_breadcrumb() {
+                Some((
+                    guardian.tool_calls_since_checkpoint(),
+                    guardian.recent_tools().to_vec(),
+                ))
+            } else {
+                None
+            }
+        };
+        if let Some((tool_count, recent)) = breadcrumb_data {
+            if let Some(ws) = self.agent.workspace() {
+                let label = self.message.channel.clone();
+                let entry = format!(
+                    "### Auto-Breadcrumb\n\
+                     - Session: {}\n\
+                     - Tool calls since checkpoint: {}\n\
+                     - Recent: {}",
+                    label, tool_count, recent.join(", "),
+                );
+                if let Err(e) = ws.append_daily_log(&entry).await {
+                    tracing::warn!("Failed to write auto-breadcrumb: {}", e);
                 }
             }
         }
